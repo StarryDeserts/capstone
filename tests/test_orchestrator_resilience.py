@@ -185,6 +185,37 @@ async def test_format_failure_degrades_to_fallback(tmp_path):
     assert len(result.citations) == 2
 
 
+async def _research_boom(req: ResearchRequest) -> ResearchDeliverable:
+    raise RuntimeError("research work failed after payment")
+
+
+async def test_research_paid_then_reject_refunds_and_fails_over(tmp_path):
+    catalog = _catalog(tmp_path, CATALOG_2R)
+    ex = FakeExchange(fee_rate=0.0)
+    bad = FakeCapClient(ex, "r1", serves=[("svc_r1", 0.05)])   # accepts + paid, work raises
+    good = FakeCapClient(ex, "r2", serves=[("svc_r2", 0.05)])
+    fmtp = FakeCapClient(ex, "f", serves=[("svc_f", 0.05)])
+    orch = FakeCapClient(ex, "orchestrator")
+    ex.credit("orchestrator", 1.0)
+    ProviderRuntime(bad, "svc_r1", _p_research, _research_boom).install()
+    ProviderRuntime(good, "svc_r2", _p_research, _research_work).install()
+    ProviderRuntime(fmtp, "svc_f", _p_format, _format_work).install()
+
+    planner = StubPlanner([
+        PlanStep("research", {"query": "X", "num_sources": 2}, True, 0), _fmt_step()])
+    work = make_orchestrator_work_fn(orch, catalog, planner, _cfg(), step_timeout=1)
+    result = await work(OrchestratorRequest(topic="X", depth=Depth.quick, format=Style.report))
+
+    research = [s for s in result.meta.sub_orders if s.role == "research"]
+    assert len(research) == 2
+    assert research[0].service_id == "svc_r1" and research[0].status == "rejected"
+    assert research[1].service_id == "svc_r2" and research[1].status == "completed"
+    assert len(result.citations) == 2
+    assert result.meta.total_cost_usdc == pytest.approx(0.10)   # completed-only: svc_r2 + svc_f
+    assert ex.balances["orchestrator"] == pytest.approx(0.90)   # svc_r1's 0.05 refunded, not stranded
+    assert all(v == 0.0 for v in ex.escrow.values())            # nothing stranded in escrow
+
+
 async def test_precheck_rejects_when_underfunded(tmp_path):
     catalog = _catalog(tmp_path, CATALOG_2R)
     ex = FakeExchange(fee_rate=0.0)
