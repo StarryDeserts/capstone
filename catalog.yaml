@@ -1,0 +1,12 @@
+# role -> list of hireable services. Own agents first; add partner teams'
+# serviceIds under any role with `external: true` to spread counterparties.
+research:
+  - { service_id: "${RESEARCH_SERVICE_ID}", price_usdc: 0.05, tags: [research, web-search] }
+verify:
+  - { service_id: "${VERIFY_SERVICE_ID}", price_usdc: 0.05, tags: [verification, fact-check] }
+format:
+  - { service_id: "${FORMAT_SERVICE_ID}", price_usdc: 0.06, tags: [writing, formatting] }
+# external:
+#   add partner serviceIds here, e.g.
+#   research:
+#     - { service_id: "svc_partner_xyz", price_usdc: 0.08, tags: [research], external: true }
