@@ -11,6 +11,7 @@ venv/
 .env
 .env.*
 !.env.example
+.mcp.json
 
 # Local data / state
 *.sqlite
