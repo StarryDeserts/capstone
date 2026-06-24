@@ -12,6 +12,7 @@ EXAMPLE_MODULES = [
     "examples.run_format",
     "examples.demo_client",
     "examples.spike_dry",
+    "examples.go_online",
 ]
 
 
