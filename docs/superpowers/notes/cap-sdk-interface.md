@@ -127,37 +127,60 @@ NegotiateOrderRequest(service_id, requirements='', metadata='', requester_agent_
 
 ---
 
-## C. Runtime semantics — CONFIRM / OBSERVE on one live settle 🔎❓
+## C. Runtime semantics
 
-Drive ONE order requester→provider→settle and fill these in. (negotiate-only is free;
-the full settle costs the one service price + any fee.)
+### C1. RESOLVED — from SDK status enums + a live error/auth probe ✅
 
-- 🔎 **`pay_order` auto-approves USDC** (no separate ERC-20 approve call). Confirm.
-- ❓ **`Order.status` wire strings** at each stage — record exact values:
-  - after `accept_negotiation`: `__________` (created/pending?)
-  - after `pay_order`: `__________` (paid?)
-  - after `deliver_order`: `__________` (delivered?)
-  - after settle: `__________` (completed?)
-  - after `reject_order` from paid: `__________` (rejected? refunded?)
-  - These map to our `OrderStatus` enum — must match what `requester.py`/`provider_runtime.py` compare against.
-- ❓ **`Negotiation.status` wire strings**: pending / accepted / rejected / expired = `__________`
-- ❓ **Event ordering & timing**: does `negotiate_order` need the WS already connected,
-  or is the negotiation created server-side regardless? Sequence observed:
-  `__________ → __________ → __________`
-- ❓ **Is `ORDER_CREATED` WS-only**, or redundant with the `Order` returned by
-  `accept_negotiation`? (We can read `order_id` synchronously either way.)
-- ❓ **Fee rate**: read `Order.fee_amount` vs `price` on a settled order → `____%`.
-  Feeds `PLATFORM_FEE_RATE` / `compute_budget`.
-- ❓ **Gas sponsorship in practice**: did `create_tx_hash`/`pay_tx_hash` appear without
-  the requester AA wallet paying ETH gas? (confirms 0%-gas launch window).
-- ❓ **`content_hash`**: is it `keccak256(deliverable_text)`? what encoding? `__________`
-- ❓ **Balance address**: which field is the fundable AA wallet —
-  `Order.requester_wallet_address`? `provider_fund_address`? Where is *my own* AA wallet
-  address surfaced for funding before any order exists? `__________`
-- ❓ **`deliverable_type` / `deliverable_schema` expected values**: free string? MIME?
+Status wire-strings come straight from the SDK enums (`croo.OrderStatus` etc.) — these
+ARE the authoritative values, no live order needed:
+
+- **NegotiationStatus**: `pending`, `accepted`, `rejected`, `expired`
+- **OrderStatus**: `created`, `paid`, `completed`, `rejected`, `expired` **plus transient
+  on-chain states** `creating`, `paying`, `delivering`, `rejecting` and failure states
+  `create_failed`, `pay_failed`, `deliver_failed`.
+- **DeliveryStatus**: `submitted`, `accepted`, `rejected`
+- ⚠️ **Task 20 must treat `creating/paying/delivering/rejecting` as in-flight** (the
+  on-chain tx is mid-flight) — poll `get_order`/await the WS terminal event rather than
+  assuming `accept`/`pay`/`deliver` returns a terminal status synchronously. The `*_failed`
+  states are terminal failures.
+
+Confirmed against the **live mainnet API** (orchestrator key, `examples/spike_dry.py`):
+- ✅ **Auth:** invalid SDK key → WS handshake `HTTP 401`; REST → `APIError SDK_KEY_INVALID
+  (code=401)`, `is_unauthorized() == True`. Valid key → WS connects.
+- ✅ **Error codes + classification** (real `APIError(code, http, message)`):
+  `SDK_KEY_INVALID` 401→`is_unauthorized`; `SERVICE_NOT_FOUND` 404→`is_not_found`;
+  `INVALID_PARAMETERS` 400→(`is_invalid_params`).
+- ✅ **`list_orders` requires `ListOptions(role=...)`** — `list_orders(None)` →
+  `INVALID_PARAMETERS: role must be 'buyer' or 'provider'`. So always pass
+  `ListOptions(role="buyer")` (or `"provider"`); `agent_id`, `status`, `page/page_size` optional.
+- ✅ **negotiate against an unknown service** → `SERVICE_NOT_FOUND` 404 (not a self-hire
+  error). The provider must own a *published, resolvable* service id.
+
+### C2. STILL needs ONE live settled order ❓ (defer until ready to spend pennies)
+
+Only obtainable by driving accept→pay→deliver→settle on a real, hireable service:
+
+- 🔎 **`pay_order` auto-approves USDC** (no separate ERC-20 approve). Confirm on first pay.
+- ❓ **Fee rate**: `Order.fee_amount` vs `price` on a settled order → `____%` (feeds
+  `PLATFORM_FEE_RATE`/`compute_budget`).
+- ❓ **Gas in practice**: do `create_tx_hash`/`pay_tx_hash` populate without the AA wallet
+  spending ETH? (confirms 0%-gas launch window).
+- ❓ **`content_hash`**: `keccak256(deliverable_text)`? encoding? `__________`
+- ❓ **Fundable wallet**: which field is the AA wallet to fund — `requester_wallet_address`
+  / `provider_fund_address`? Where is *my own* AA address surfaced before any order exists?
+  (likely the dashboard, not the SDK) `__________`
+- ❓ **`deliverable_type` / `deliverable_schema` accepted values**: free string? MIME?
   schema name? What does the platform validate? `__________`
-- ❓ **SLA / deadlines**: `delivery_window` units (seconds?); `sla_deadline` / `pay_deadline`
+- ❓ **Deadlines**: `delivery_window` units (seconds?); `sla_deadline`/`pay_deadline`
   format (ISO? epoch?). `__________`
+- ❓ **Event ordering/timing**: observed sequence `__________ → __________ → __________`.
+
+### C3. BLOCKER hit during the spike
+
+The configured `COO_ORCHESTRATOR_SERVICE_ID` (`svc-new-…`) returns `SERVICE_NOT_FOUND`.
+Need ONE of: (a) the correct/published orchestrator service id, or (b) a *second* real
+agent (or an external team's service id) so we can observe a successful requester→provider
+negotiation — which we need for anti-sybil anyway. Until then C2 stays blank.
 
 ---
 
