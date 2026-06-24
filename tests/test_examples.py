@@ -11,6 +11,7 @@ EXAMPLE_MODULES = [
     "examples.run_verify",
     "examples.run_format",
     "examples.demo_client",
+    "examples.spike_dry",
 ]
 
 
