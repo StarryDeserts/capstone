@@ -20,11 +20,13 @@ class _SDKErr(Exception):
 class _FakeStream:
     def __init__(self):
         self.cb = None
+        self.connect_calls = 0
 
     def on_any(self, handler):
         self.cb = handler
 
     async def connect(self):
+        self.connect_calls += 1
         return None
 
     async def close(self):
@@ -45,6 +47,9 @@ class FakeSDK:
             raise self.raise_on[name]
 
     async def connect_websocket(self):
+        # Mirror croo: connect_websocket() dials the socket (one connect) and
+        # returns a live stream. RealCapClient.connect() must NOT reconnect.
+        await self.stream.connect()
         return self.stream
 
     async def close(self):
@@ -132,6 +137,14 @@ async def test_negotiate_and_accept_translate():
     assert order.order_id == "o1" and order.status is OrderStatus.created
     assert order.price_usdc == 0.05                      # price str -> float
     assert ("accept", "neg1", "0xAA") in fake.calls      # used with-fund variant
+
+
+async def test_connect_does_not_double_open_socket():
+    # croo's connect_websocket() already opens the socket; a second connect()
+    # under the same SDK key triggers a duplicate-key policy violation server-side.
+    cap, fake = await _connected()
+    assert fake.stream.cb is not None        # our on_any handler is registered
+    assert fake.stream.connect_calls == 1    # opened once (by connect_websocket), not re-opened
 
 
 async def test_await_order_created_from_buffered_event():

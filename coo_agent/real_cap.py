@@ -138,9 +138,15 @@ class RealCapClient:
         if self._sdk is None:
             self._sdk = self._build_sdk()
         self._loop = asyncio.get_running_loop()
+        # croo's connect_websocket() already dials the socket and starts the reader
+        # loop, returning a live stream. Calling EventStream.connect() again opens a
+        # SECOND socket under the same SDK key, which the server closes as a duplicate
+        # ("websocket policy violation (duplicate key)"). So register our handler on
+        # the already-connected stream and do NOT reconnect. Events arriving before
+        # on_any is registered are dropped, but we register at startup before issuing
+        # any request, so no order/negotiation event is in flight yet.
         self._stream = await self._sdk.connect_websocket()
-        self._stream.on_any(self._on_sdk_event)   # sync registration
-        await self._stream.connect()               # start receiving AFTER on_any
+        self._stream.on_any(self._on_sdk_event)
 
     async def close(self) -> None:
         if self._stream is not None:
